@@ -1,0 +1,10 @@
+# Compiladores/dependências
+cache/
+out/
+
+# Nunca commitar segredos
+.env
+.env.local
+
+# Broadcast fica versionado de propósito (é o registro público de deploys
+# reais na Sepolia, mesmo padrão do niara-contracts-PMEs) — não ignorar.
