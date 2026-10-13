@@ -5,93 +5,93 @@ import {Test} from "forge-std/Test.sol";
 import {RegistroAssinaturas} from "../src/registro/RegistroAssinaturas.sol";
 
 contract RegistroAssinaturasTest is Test {
-    RegistroAssinaturas registro;
+    RegistroAssinaturas registry;
 
     address alice = address(0xA11CE);
     address bob = address(0xB0B);
 
-    bytes32 constant HASH_DOC_1 = keccak256("documento-1");
-    bytes32 constant HASH_DOC_2 = keccak256("documento-2");
+    bytes32 constant DOC_HASH_1 = keccak256("document-1");
+    bytes32 constant DOC_HASH_2 = keccak256("document-2");
 
     function setUp() public {
-        registro = new RegistroAssinaturas();
+        registry = new RegistroAssinaturas();
     }
 
-    function test_RegistraDocumentoComSucesso() public {
+    function test_RegistersDocumentSuccessfully() public {
         vm.prank(alice);
-        registro.registrar(HASH_DOC_1, "Ata de reuniao", "ata");
+        registry.registrar(DOC_HASH_1, "Meeting minutes", "minutes");
 
-        (bool existe, address assinante, uint256 ts, string memory nome, string memory tipo) =
-            registro.verificar(HASH_DOC_1);
+        (bool exists, address signer, uint256 ts, string memory name, string memory docType) =
+            registry.verificar(DOC_HASH_1);
 
-        assertTrue(existe);
-        assertEq(assinante, alice);
+        assertTrue(exists);
+        assertEq(signer, alice);
         assertEq(ts, block.timestamp);
-        assertEq(nome, "Ata de reuniao");
-        assertEq(tipo, "ata");
+        assertEq(name, "Meeting minutes");
+        assertEq(docType, "minutes");
     }
 
-    function test_EmiteEventoAoRegistrar() public {
+    function test_EmitsEventOnRegister() public {
         vm.expectEmit(true, true, false, true);
         emit RegistroAssinaturas.DocumentoRegistrado(
-            HASH_DOC_1, alice, "Ata de reuniao", "ata", block.timestamp
+            DOC_HASH_1, alice, "Meeting minutes", "minutes", block.timestamp
         );
 
         vm.prank(alice);
-        registro.registrar(HASH_DOC_1, "Ata de reuniao", "ata");
+        registry.registrar(DOC_HASH_1, "Meeting minutes", "minutes");
     }
 
-    function test_RevertQuandoDocumentoJaRegistrado() public {
+    function test_RevertWhenDocumentAlreadyRegistered() public {
         vm.prank(alice);
-        registro.registrar(HASH_DOC_1, "Ata de reuniao", "ata");
+        registry.registrar(DOC_HASH_1, "Meeting minutes", "minutes");
 
         vm.prank(bob);
         vm.expectRevert(
-            abi.encodeWithSelector(RegistroAssinaturas.DocumentoJaRegistrado.selector, HASH_DOC_1)
+            abi.encodeWithSelector(RegistroAssinaturas.DocumentoJaRegistrado.selector, DOC_HASH_1)
         );
-        registro.registrar(HASH_DOC_1, "Tentativa de sobrescrever", "ata");
+        registry.registrar(DOC_HASH_1, "Overwrite attempt", "minutes");
     }
 
-    function test_RevertQuandoHashZerado() public {
+    function test_RevertWhenHashIsZero() public {
         vm.prank(alice);
         vm.expectRevert(RegistroAssinaturas.HashInvalido.selector);
-        registro.registrar(bytes32(0), "Documento invalido", "ata");
+        registry.registrar(bytes32(0), "Invalid document", "minutes");
     }
 
-    function test_VerificarDocumentoInexistenteRetornaVazio() public view {
-        (bool existe, address assinante, uint256 ts, string memory nome, string memory tipo) =
-            registro.verificar(HASH_DOC_2);
+    function test_VerifyUnknownDocumentReturnsEmpty() public view {
+        (bool exists, address signer, uint256 ts, string memory name, string memory docType) =
+            registry.verificar(DOC_HASH_2);
 
-        assertFalse(existe);
-        assertEq(assinante, address(0));
+        assertFalse(exists);
+        assertEq(signer, address(0));
         assertEq(ts, 0);
-        assertEq(nome, "");
-        assertEq(tipo, "");
+        assertEq(name, "");
+        assertEq(docType, "");
     }
 
-    function test_DoisDocumentosDiferentesNaoColidem() public {
+    function test_TwoDifferentDocumentsDoNotCollide() public {
         vm.prank(alice);
-        registro.registrar(HASH_DOC_1, "Documento A", "contrato");
+        registry.registrar(DOC_HASH_1, "Document A", "contract");
 
         vm.prank(bob);
-        registro.registrar(HASH_DOC_2, "Documento B", "cap table");
+        registry.registrar(DOC_HASH_2, "Document B", "cap table");
 
-        (, address assinante1,,,) = registro.verificar(HASH_DOC_1);
-        (, address assinante2,,,) = registro.verificar(HASH_DOC_2);
+        (, address signer1,,,) = registry.verificar(DOC_HASH_1);
+        (, address signer2,,,) = registry.verificar(DOC_HASH_2);
 
-        assertEq(assinante1, alice);
-        assertEq(assinante2, bob);
+        assertEq(signer1, alice);
+        assertEq(signer2, bob);
     }
 
-    function testFuzz_RegistraQualquerHashNaoZerado(bytes32 hash, address quem) public {
+    function testFuzz_RegistersAnyNonZeroHash(bytes32 hash, address who) public {
         vm.assume(hash != bytes32(0));
-        vm.assume(quem != address(0));
+        vm.assume(who != address(0));
 
-        vm.prank(quem);
-        registro.registrar(hash, "Doc fuzz", "generico");
+        vm.prank(who);
+        registry.registrar(hash, "Fuzz doc", "generic");
 
-        (bool existe, address assinante,,,) = registro.verificar(hash);
-        assertTrue(existe);
-        assertEq(assinante, quem);
+        (bool exists, address signer,,,) = registry.verificar(hash);
+        assertTrue(exists);
+        assertEq(signer, who);
     }
 }
