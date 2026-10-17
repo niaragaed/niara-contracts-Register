@@ -8,3 +8,7 @@ out/
 
 # broadcast/ is versioned on purpose (it is the public record of real
 # deployments, same pattern as niara-contracts-PMEs). Do not ignore it.
+
+# local Claude Code state; only the shared settings are versioned
+/.claude/*
+!/.claude/settings.json
