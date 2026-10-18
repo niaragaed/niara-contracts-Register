@@ -1,10 +1,14 @@
-# Compiladores/dependências
+# Compiler output / dependencies
 cache/
 out/
 
-# Nunca commitar segredos
+# Never commit secrets
 .env
 .env.local
 
-# Broadcast fica versionado de propósito (é o registro público de deploys
-# reais na Sepolia, mesmo padrão do niara-contracts-PMEs) — não ignorar.
+# broadcast/ is versioned on purpose (it is the public record of real
+# deployments, same pattern as niara-contracts-PMEs). Do not ignore it.
+
+# local Claude Code state; only the shared settings are versioned
+/.claude/*
+!/.claude/settings.json
