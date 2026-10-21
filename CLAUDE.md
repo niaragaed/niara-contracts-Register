@@ -13,7 +13,7 @@ change the ABI. New contracts should use English names from the start.
 
 ## Contracts
 
-- `src/registro/RegistroAssinaturas.sol` — v1, live on six testnets. Stores the
+- `src/registro/RegistroAssinaturas.sol` — v1, live on five EVM testnets. Stores the
   document name and type in plain text, which is public forever; kept only so
   existing records stay verifiable. Do not point new flows at it.
 - `src/v2/SignatureRegistryV2.sol` — current registry. Stores the record hash,
