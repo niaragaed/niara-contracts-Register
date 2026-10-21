@@ -55,6 +55,23 @@ form mirrors records from all six networks
 - No owner, no admin functions and no upgradeability. The deployer key has no
   power over the contract after deployment.
 
+## v2 (not deployed yet)
+
+- [`src/v2/SignatureRegistryV2.sol`](src/v2/SignatureRegistryV2.sol): `register(recordHash, scheme, metadataCommitment)` stores no readable metadata and mints a **soulbound receipt** (ERC-721 + ERC-5192, fully on-chain metadata pointing to the verification page) to the signer in the same transaction. Scheme 0 = SHA-256 of a PAdES-signed PDF; scheme 1 = `SHA-256("niara-record-v1" ‖ salt ‖ SHA-256(file))`. Metadata commitment = `SHA-256("niara-meta-v1" ‖ salt ‖ {"name","type"} JSON)`.
+- [`src/mletr/TransferableRecordRegistry.sol`](src/mletr/TransferableRecordRegistry.sol): transferable electronic records designed to line up with MLETR — one token per document hash (no hash ever reused), control by the holder, issuer-proposed / holder-accepted amendments, surrender and termination (including replacement by paper). Aligned with MLETR, not "compliant": Brazil has not enacted it.
+- v1 (`RegistroAssinaturas`) stays deployed so old records remain verifiable; its name/type fields are public forever.
+
+Deploy both on a network (the URL is baked into every receipt and cannot change):
+
+```bash
+PRIVATE_KEY=... VERIFY_BASE_URL=https://niara-register.vercel.app/verify/sepolia/ \
+  forge script script/DeployV2.s.sol --rpc-url sepolia --broadcast
+```
+
+Repeat per network with its slug (`base-sepolia`, `robinhood-testnet`, `hyperevm-testnet`, `tempo-testnet`), then copy the addresses into Niara-Register's `lib/register-v2-evm.ts` and the indexer's `<PREFIX>_V2_*` variables.
+
+Known limitation: `register` can be front-run from the public mempool (someone copies the hash and lands first). A commit-reveal step would close it.
+
 ## Run locally
 
 ```bash
