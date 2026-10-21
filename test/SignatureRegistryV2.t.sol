@@ -29,6 +29,16 @@ contract SignatureRegistryV2Test is Test {
         META = sha256(abi.encodePacked("niara-meta-v1", SALT, '{"name":"Lease","type":"contract"}'));
     }
 
+    // --- cross-implementation recipes ---------------------------------------
+
+    /// Same reference values as Niara-Register/tests/commitments.test.ts
+    /// (computed independently with Python's hashlib).
+    function test_HashRecipesMatchTheSite() public view {
+        assertEq(FILE_SHA, 0x0b8f9601ddc97b9b8001400ae6db7375758265717411c37a0da22464297c560d);
+        assertEq(SALTED, 0x82bf02f65a53f5e58f8fb1cee8d6755b510fea33c837c7ac2254b3dfaea02f85);
+        assertEq(META, 0x6719dec3650b0ad2995639450d375883cd14c9843dea430239a5557dd51f3647);
+    }
+
     // --- registration -----------------------------------------------------
 
     function test_RegisterStoresRecordAndMintsReceipt() public {
