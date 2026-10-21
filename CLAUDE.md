@@ -11,6 +11,24 @@ are (`RegistroAssinaturas`, `registrar`, `verificar`, `DocumentoRegistrado`,
 contract is live at the same address on five EVM testnets and renaming would
 change the ABI. New contracts should use English names from the start.
 
+## Contracts
+
+- `src/registro/RegistroAssinaturas.sol` — v1, live on six testnets. Stores the
+  document name and type in plain text, which is public forever; kept only so
+  existing records stay verifiable. Do not point new flows at it.
+- `src/v2/SignatureRegistryV2.sol` — current registry. Stores the record hash,
+  the hash scheme and a salted metadata commitment (never readable metadata),
+  and mints a soulbound receipt (ERC-721 + ERC-5192) to the signer in the same
+  transaction. The hash recipes must stay byte-identical to the site's
+  `lib/commitments.ts` in Niara-Register.
+- `src/mletr/TransferableRecordRegistry.sol` — transferable electronic records
+  designed to line up with MLETR (singularity, exclusive control, amendment,
+  surrender, termination). Describe it as "aligned with MLETR", never as
+  "MLETR compliant": Brazil has not enacted MLETR.
+
+Dependencies are vendored in `lib/` (forge-std, OpenZeppelin `contracts/` only)
+and pinned in `foundry.lock`.
+
 ## No AI attribution (hard rule)
 
 Nothing in this repository credits an AI tool, anywhere:
