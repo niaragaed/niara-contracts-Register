@@ -7,6 +7,12 @@ remappings = [
     "forge-std/=lib/forge-std/src/",
 ]
 solc_version = "0.8.24"
+# Optimizer on since v2: it cuts SignatureRegistryV2 / TransferableRecordRegistry
+# deploy gas from ~3.1M to ~1.9M / ~1.6M each, under HyperEVM's 3M small-block
+# limit. RegistroAssinaturas (v1) was deployed with the optimizer OFF: to verify
+# its source on an explorer, build it with `--optimize false`.
+optimizer = true
+optimizer_runs = 200
 
 [rpc_endpoints]
 sepolia = "${RPC_URL}"

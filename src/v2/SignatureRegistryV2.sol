@@ -155,7 +155,8 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
         Record memory r = _records[bytes32(tokenId)];
         string memory hashHex = tokenId.toHexString(32);
 
-        string memory json = string.concat(
+        // Built in two parts: one long string.concat is "stack too deep" with the optimizer on.
+        string memory head = string.concat(
             '{"name":"Niara Register receipt",',
             '"description":"Proof that this wallet registered a document fingerprint on Niara Register. ',
             'The document itself is not on-chain. Non-transferable.",',
@@ -163,7 +164,10 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
             _verifyBaseUrl,
             hashHex,
             '","image":"data:image/svg+xml;base64,',
-            Base64.encode(bytes(_svg(hashHex))),
+            Base64.encode(bytes(_svg(hashHex)))
+        );
+        string memory json = string.concat(
+            head,
             '","attributes":[{"trait_type":"Record hash","value":"',
             hashHex,
             '"},{"trait_type":"Hash scheme","value":"',
