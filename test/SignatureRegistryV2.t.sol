@@ -12,6 +12,7 @@ contract SignatureRegistryV2Test is Test {
     address alice = address(0xA11CE);
     address bob = address(0xB0B);
 
+    uint16 constant CONTRACT_TYPE = 1;
     string constant BASE = "https://niara-register.vercel.app/verify/sepolia/";
 
     // sha256 is a precompile call, so it would consume vm.prank/expectRevert if
@@ -43,58 +44,72 @@ contract SignatureRegistryV2Test is Test {
 
     function test_RegisterStoresRecordAndMintsReceipt() public {
         vm.prank(alice);
-        uint256 tokenId = registry.register(FILE_SHA, 0, META);
+        uint256 tokenId = registry.register(FILE_SHA, 0, CONTRACT_TYPE, META);
 
         assertEq(tokenId, uint256(FILE_SHA));
         assertEq(registry.ownerOf(tokenId), alice);
         assertEq(registry.balanceOf(alice), 1);
 
-        (bool exists, address signer, uint256 ts, uint8 scheme, bytes32 meta) = registry.verify(FILE_SHA);
+        (bool exists, address signer, uint256 ts, uint8 scheme, uint16 docType, bytes32 meta) = registry.verify(FILE_SHA);
         assertTrue(exists);
         assertEq(signer, alice);
         assertEq(ts, block.timestamp);
         assertEq(scheme, 0);
+        assertEq(docType, CONTRACT_TYPE);
         assertEq(meta, META);
     }
 
     function test_RegisterSaltedScheme() public {
         vm.prank(alice);
-        registry.register(SALTED, 1, bytes32(0));
-        (bool exists,,, uint8 scheme, bytes32 meta) = registry.verify(SALTED);
+        registry.register(SALTED, 1, CONTRACT_TYPE, bytes32(0));
+        (bool exists,,, uint8 scheme, uint16 docType, bytes32 meta) = registry.verify(SALTED);
         assertTrue(exists);
         assertEq(scheme, 1);
+        assertEq(docType, CONTRACT_TYPE);
         assertEq(meta, bytes32(0));
+    }
+
+    function test_RevertsOnZeroDocumentType() public {
+        vm.expectRevert(SignatureRegistryV2.InvalidDocumentType.selector);
+        registry.register(FILE_SHA, 0, 0, META);
+    }
+
+    function test_DocumentTypeLabels() public view {
+        assertEq(registry.documentTypeLabel(1), "Contract");
+        assertEq(registry.documentTypeLabel(9), "Shareholder register / cap table");
+        assertEq(registry.documentTypeLabel(11), "Other");
+        assertEq(registry.documentTypeLabel(42), "Other (code 42)");
     }
 
     function test_EmitsLockedAndDocumentRegistered() public {
         vm.expectEmit(false, false, false, true);
         emit IERC5192.Locked(uint256(FILE_SHA));
         vm.expectEmit(true, true, false, true);
-        emit SignatureRegistryV2.DocumentRegistered(FILE_SHA, alice, 0, META, block.timestamp);
+        emit SignatureRegistryV2.DocumentRegistered(FILE_SHA, alice, 0, CONTRACT_TYPE, META, block.timestamp);
         vm.prank(alice);
-        registry.register(FILE_SHA, 0, META);
+        registry.register(FILE_SHA, 0, CONTRACT_TYPE, META);
     }
 
     function test_RevertsOnDuplicateEvenFromAnotherSigner() public {
         vm.prank(alice);
-        registry.register(FILE_SHA, 0, META);
+        registry.register(FILE_SHA, 0, CONTRACT_TYPE, META);
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(SignatureRegistryV2.AlreadyRegistered.selector, FILE_SHA));
-        registry.register(FILE_SHA, 1, bytes32(0));
+        registry.register(FILE_SHA, 1, CONTRACT_TYPE, bytes32(0));
     }
 
     function test_RevertsOnZeroHash() public {
         vm.expectRevert(SignatureRegistryV2.InvalidHash.selector);
-        registry.register(bytes32(0), 0, META);
+        registry.register(bytes32(0), 0, CONTRACT_TYPE, META);
     }
 
     function test_RevertsOnUnknownScheme() public {
         vm.expectRevert(abi.encodeWithSelector(SignatureRegistryV2.UnknownScheme.selector, uint8(2)));
-        registry.register(FILE_SHA, 2, META);
+        registry.register(FILE_SHA, 2, CONTRACT_TYPE, META);
     }
 
     function test_UnknownHashReturnsZeros() public view {
-        (bool exists, address signer, uint256 ts, uint8 scheme, bytes32 meta) = registry.verify(FILE_SHA);
+        (bool exists, address signer, uint256 ts, uint8 scheme, uint16 docType, bytes32 meta) = registry.verify(FILE_SHA);
         assertFalse(exists);
         assertEq(signer, address(0));
         assertEq(ts, 0);
@@ -106,7 +121,7 @@ contract SignatureRegistryV2Test is Test {
 
     function test_ReceiptIsLocked() public {
         vm.prank(alice);
-        uint256 tokenId = registry.register(FILE_SHA, 0, META);
+        uint256 tokenId = registry.register(FILE_SHA, 0, CONTRACT_TYPE, META);
         assertTrue(registry.locked(tokenId));
     }
 
@@ -117,7 +132,7 @@ contract SignatureRegistryV2Test is Test {
 
     function test_TransfersRevert() public {
         vm.prank(alice);
-        uint256 tokenId = registry.register(FILE_SHA, 0, META);
+        uint256 tokenId = registry.register(FILE_SHA, 0, CONTRACT_TYPE, META);
 
         vm.startPrank(alice);
         vm.expectRevert(SignatureRegistryV2.Soulbound.selector);
@@ -133,7 +148,7 @@ contract SignatureRegistryV2Test is Test {
 
     function test_ApprovalsRevert() public {
         vm.prank(alice);
-        uint256 tokenId = registry.register(FILE_SHA, 0, META);
+        uint256 tokenId = registry.register(FILE_SHA, 0, CONTRACT_TYPE, META);
         vm.startPrank(alice);
         vm.expectRevert(SignatureRegistryV2.Soulbound.selector);
         registry.approve(bob, tokenId);
@@ -154,7 +169,7 @@ contract SignatureRegistryV2Test is Test {
 
     function test_TokenURIIsOnChainJsonWithoutPrivateData() public {
         vm.prank(alice);
-        uint256 tokenId = registry.register(FILE_SHA, 0, META);
+        uint256 tokenId = registry.register(FILE_SHA, 0, CONTRACT_TYPE, META);
 
         string memory uri = registry.tokenURI(tokenId);
         string memory prefix = "data:application/json;base64,";
@@ -164,6 +179,7 @@ contract SignatureRegistryV2Test is Test {
         string memory hashHex = vm.toString(FILE_SHA);
         assertTrue(_contains(json, string.concat('"external_url":"', BASE, hashHex, '"')));
         assertTrue(_contains(json, "Signed PDF (PAdES) SHA-256"));
+        assertTrue(_contains(json, '"trait_type":"Document type","value":"Contract"'));
         assertTrue(_contains(json, string.concat('"value":', vm.toString(block.timestamp))));
         // The metadata commitment is not exposed in the receipt.
         assertFalse(_contains(json, vm.toString(META)));
@@ -175,16 +191,20 @@ contract SignatureRegistryV2Test is Test {
         registry.tokenURI(7);
     }
 
-    function testFuzz_RegisterAnyNonZeroHash(bytes32 h, uint8 scheme, bytes32 meta, address who) public {
+    function testFuzz_RegisterAnyNonZeroHash(bytes32 h, uint8 scheme, uint16 docType, bytes32 meta, address who)
+        public
+    {
         vm.assume(h != bytes32(0) && who != address(0));
         scheme = uint8(bound(scheme, 0, 1));
+        docType = uint16(bound(docType, 1, type(uint16).max));
         vm.prank(who);
-        uint256 tokenId = registry.register(h, scheme, meta);
+        uint256 tokenId = registry.register(h, scheme, docType, meta);
         assertEq(registry.ownerOf(tokenId), who);
-        (bool exists, address signer,, uint8 s, bytes32 m) = registry.verify(h);
+        (bool exists, address signer,, uint8 s, uint16 t, bytes32 m) = registry.verify(h);
         assertTrue(exists);
         assertEq(signer, who);
         assertEq(s, scheme);
+        assertEq(t, docType);
         assertEq(m, meta);
     }
 

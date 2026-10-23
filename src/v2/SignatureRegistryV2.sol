@@ -43,10 +43,19 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
     uint8 public constant SCHEME_SIGNED_PDF_SHA256 = 0;
     uint8 public constant SCHEME_SALTED_SHA256 = 1;
 
+    /// Public document type, from a fixed list (never free text, so no names
+    /// leak through it). 0 is invalid. Codes 1..11 have labels below; higher
+    /// codes are accepted for types added later and are labelled generically.
+    /// 1 Contract, 2 Meeting minutes, 3 Power of attorney, 4 Promissory note,
+    /// 5 Declaration, 6 Receipt, 7 Agreement, 8 Articles of association / bylaws,
+    /// 9 Shareholder register / cap table, 10 Report / appraisal, 11 Other.
+    uint16 public constant LAST_LABELLED_TYPE = 11;
+
     struct Record {
         address signer;
         uint64 timestamp;
         uint8 scheme;
+        uint16 documentType;
         bytes32 metadataCommitment;
     }
 
@@ -61,6 +70,7 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
         bytes32 indexed recordHash,
         address indexed signer,
         uint8 scheme,
+        uint16 documentType,
         bytes32 metadataCommitment,
         uint256 timestamp
     );
@@ -68,6 +78,7 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
     error AlreadyRegistered(bytes32 recordHash);
     error InvalidHash();
     error UnknownScheme(uint8 scheme);
+    error InvalidDocumentType();
     error Soulbound();
 
     constructor(string memory verifyBaseUrl_) ERC721("Niara Register Receipt", "NIARA-R") {
@@ -77,21 +88,24 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
     /// @notice Registers a document fingerprint and mints a soulbound receipt to the caller.
     /// @param recordHash See the scheme constants for how it is computed.
     /// @param scheme SCHEME_SIGNED_PDF_SHA256 or SCHEME_SALTED_SHA256.
+    /// @param documentType Public type code (see LAST_LABELLED_TYPE); must not be 0.
     /// @param metadataCommitment SHA-256("niara-meta-v1" || salt || metadata JSON), or zero
     ///        when there is no metadata. Never the metadata itself.
     /// @return tokenId The receipt id, equal to uint256(recordHash).
-    function register(bytes32 recordHash, uint8 scheme, bytes32 metadataCommitment)
+    function register(bytes32 recordHash, uint8 scheme, uint16 documentType, bytes32 metadataCommitment)
         external
         returns (uint256 tokenId)
     {
         if (recordHash == bytes32(0)) revert InvalidHash();
         if (scheme > SCHEME_SALTED_SHA256) revert UnknownScheme(scheme);
+        if (documentType == 0) revert InvalidDocumentType();
         if (_records[recordHash].timestamp != 0) revert AlreadyRegistered(recordHash);
 
         _records[recordHash] = Record({
             signer: msg.sender,
             timestamp: uint64(block.timestamp),
             scheme: scheme,
+            documentType: documentType,
             metadataCommitment: metadataCommitment
         });
 
@@ -101,18 +115,41 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
         _mint(msg.sender, tokenId);
 
         emit Locked(tokenId);
-        emit DocumentRegistered(recordHash, msg.sender, scheme, metadataCommitment, block.timestamp);
+        emit DocumentRegistered(recordHash, msg.sender, scheme, documentType, metadataCommitment, block.timestamp);
     }
 
     /// @notice Looks up a record. Returns all-zero values if the hash was never registered.
     function verify(bytes32 recordHash)
         external
         view
-        returns (bool exists, address signer, uint256 timestamp, uint8 scheme, bytes32 metadataCommitment)
+        returns (
+            bool exists,
+            address signer,
+            uint256 timestamp,
+            uint8 scheme,
+            uint16 documentType,
+            bytes32 metadataCommitment
+        )
     {
         Record memory r = _records[recordHash];
         exists = r.timestamp != 0;
-        return (exists, r.signer, r.timestamp, r.scheme, r.metadataCommitment);
+        return (exists, r.signer, r.timestamp, r.scheme, r.documentType, r.metadataCommitment);
+    }
+
+    /// @notice English label of a document type code ("Other (code N)" for codes added later).
+    function documentTypeLabel(uint16 code) public pure returns (string memory) {
+        if (code == 1) return "Contract";
+        if (code == 2) return "Meeting minutes";
+        if (code == 3) return "Power of attorney";
+        if (code == 4) return "Promissory note";
+        if (code == 5) return "Declaration";
+        if (code == 6) return "Receipt";
+        if (code == 7) return "Agreement";
+        if (code == 8) return "Articles of association / bylaws";
+        if (code == 9) return "Shareholder register / cap table";
+        if (code == 10) return "Report / appraisal";
+        if (code == 11) return "Other";
+        return string.concat("Other (code ", uint256(code).toString(), ")");
     }
 
     // ------------------------------------------------------------------
@@ -170,6 +207,8 @@ contract SignatureRegistryV2 is ERC721, IERC5192 {
             head,
             '","attributes":[{"trait_type":"Record hash","value":"',
             hashHex,
+            '"},{"trait_type":"Document type","value":"',
+            documentTypeLabel(r.documentType),
             '"},{"trait_type":"Hash scheme","value":"',
             r.scheme == SCHEME_SIGNED_PDF_SHA256 ? "Signed PDF (PAdES) SHA-256" : "Salted SHA-256",
             '"},{"display_type":"date","trait_type":"Registered at","value":',
