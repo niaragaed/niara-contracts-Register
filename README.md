@@ -57,20 +57,25 @@ form mirrors records from all six networks
 
 ## v2
 
-- [`src/v2/SignatureRegistryV2.sol`](src/v2/SignatureRegistryV2.sol): `register(recordHash, scheme, metadataCommitment)` stores no readable metadata and mints a **soulbound receipt** (ERC-721 + ERC-5192, fully on-chain metadata pointing to the verification page) to the signer in the same transaction. Scheme 0 = SHA-256 of a PAdES-signed PDF; scheme 1 = `SHA-256("niara-record-v1" ‖ salt ‖ SHA-256(file))`. Metadata commitment = `SHA-256("niara-meta-v1" ‖ salt ‖ {"name","type"} JSON)`.
+- [`src/v2/SignatureRegistryV2.sol`](src/v2/SignatureRegistryV2.sol): `register(recordHash, scheme, documentType, metadataCommitment)` stores no readable metadata except a **public document type code** from a fixed list (1 contract … 11 other, `documentTypeLabel`; 0 is rejected, the name stays private), and mints a **soulbound receipt** (ERC-721 + ERC-5192, fully on-chain metadata pointing to the verification page) to the signer in the same transaction. Scheme 0 = SHA-256 of a PAdES-signed PDF; scheme 1 = `SHA-256("niara-record-v1" ‖ salt ‖ SHA-256(file))`. Metadata commitment = `SHA-256("niara-meta-v1" ‖ salt ‖ {"name","type"} JSON)`.
 - [`src/mletr/TransferableRecordRegistry.sol`](src/mletr/TransferableRecordRegistry.sol): transferable electronic records designed to line up with MLETR — one token per document hash (no hash ever reused), control by the holder, issuer-proposed / holder-accepted amendments, surrender and termination (including replacement by paper). Aligned with MLETR, not "compliant": Brazil has not enacted it.
 - v1 (`RegistroAssinaturas`) stays deployed so old records remain verifiable; its name/type fields are public forever.
 
-Deployed on 2026-10-22 from the dedicated Register wallet `0x4369db734fdC5A3Aefd4D40456161BfcD9E235dc`
-(receipts in `broadcast/DeployV2.s.sol/`):
+Deployed from the dedicated Register wallet `0x4369db734fdC5A3Aefd4D40456161BfcD9E235dc`.
+`SignatureRegistryV2` with the document type on 2026-10-23 (receipts in
+`broadcast/DeploySignatureRegistryV2.s.sol/`); `TransferableRecordRegistry` on 2026-10-22 (receipts in
+`broadcast/DeployV2.s.sol/`):
 
-| Network | SignatureRegistryV2 | TransferableRecordRegistry | Deploy block |
-|---|---|---|---|
-| Ethereum Sepolia | `0x03Ad59E1d10Cf1C5449AD4A923f0892b7aA9A547` | `0x764A5de7baF5B33444c271E230007b81755aD424` | 11966993 |
-| Base Sepolia | `0x6cf0a197B106DaE24138230c281b4B91b1d4ff50` | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 48593926 |
-| Robinhood Chain Testnet | `0x6cf0a197B106DaE24138230c281b4B91b1d4ff50` | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 140484857 |
-| HyperEVM Testnet | `0x6cf0a197B106DaE24138230c281b4B91b1d4ff50` | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 67552236 |
-| Tempo Testnet | `0x6cf0a197B106DaE24138230c281b4B91b1d4ff50` | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 40637977 |
+| Network | SignatureRegistryV2 | Block | TransferableRecordRegistry | Block |
+|---|---|---|---|---|
+| Ethereum Sepolia | `0xAcC6BddCD560e4fd87F179d2bc6C1C518c50F514` | 11973857 | `0x764A5de7baF5B33444c271E230007b81755aD424` | 11966993 |
+| Base Sepolia | `0x0E20b7c965a772fECc1d3a1DF2B4a9CC39Fc7156` | 49014444 | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 48593926 |
+| Robinhood Chain Testnet | `0x0E20b7c965a772fECc1d3a1DF2B4a9CC39Fc7156` | 141073124 | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 140484857 |
+| HyperEVM Testnet | `0x0E20b7c965a772fECc1d3a1DF2B4a9CC39Fc7156` | 67637355 | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 67552236 |
+| Tempo Testnet | `0x0E20b7c965a772fECc1d3a1DF2B4a9CC39Fc7156` | 40775752 | `0x09081D02b06f10D87DE7c99E48F8f07505D25f26` | 40637977 |
+
+The first `SignatureRegistryV2` (2026-10-22, no document type: Sepolia `0x03Ad59E1…`, others
+`0x6cf0a197…`) is retired; its test records stay on-chain but the site and the indexer no longer read it.
 
 Receipts point to `https://niara-register.vercel.app/verify/<network>/` (testnet only; mainnet
 will be a new deployment with the final domain).
