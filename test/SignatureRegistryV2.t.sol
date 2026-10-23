@@ -114,6 +114,7 @@ contract SignatureRegistryV2Test is Test {
         assertEq(signer, address(0));
         assertEq(ts, 0);
         assertEq(scheme, 0);
+        assertEq(docType, 0);
         assertEq(meta, bytes32(0));
     }
 
