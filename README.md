@@ -95,7 +95,44 @@ local estimate, so use `--gas-estimate-multiplier 800` (900 would exceed the 16.
 gas cap); on **Tempo** use `--gas-estimate-multiplier 700`. Check with `eth_estimateGas` on the
 target node before deploying anything new.
 
-Known limitation: `register` can be front-run from the public mempool (someone copies the hash and lands first). A commit-reveal step would close it.
+Known limitation of v2: `register` can be front-run from the public mempool (someone copies the hash and lands first). Fixed in v3 below.
+
+## v3 (commit-reveal + ORB attestation; not deployed yet)
+
+[`src/v3/SignatureRegistryV3.sol`](src/v3/SignatureRegistryV3.sol) is v2 with two changes. Same hash
+recipes, same soulbound receipt, same "no readable metadata" rule.
+
+**Commit-reveal.** Registration takes two transactions:
+
+1. `commit(c)` with `c = keccak256(abi.encode(chainid, registry, signer, recordHash, nonce))`
+   (`commitmentOf` computes it; `nonce` is 32 random bytes kept by the signer). It reveals nothing
+   about the document.
+2. `register(recordHash, scheme, documentType, metadataCommitment, nonce, orbReportHash, orbSignature)`
+   in a **later block** (`MIN_REVEAL_DELAY_BLOCKS = 1`) and within `COMMITMENT_TTL = 1 day`.
+
+Commitments are stored per committer address, so copying either transaction from the mempool is
+useless: the copier has no commitment of their own from an earlier block. A live commitment cannot
+be reset (that would let its owner, and only its owner, push back its own delay); an expired one can
+be made again. What commit-reveal does **not** change: someone who already holds the document hash
+(for example the other party of a contract) can commit and register it first with their own
+address. The record says who registered it; for a PAdES PDF, who signed it is inside the PDF.
+
+**ORB attestation.** `orbReportHash` is the hash of an ORB analysis report. It is accepted only with
+an EIP-712 `OrbAttestation(bytes32 recordHash, bytes32 reportHash, address signer)` signature by
+`orbAttester` (domain `"Niara Register"`, version `"3"`), so the receipt's "ORB analysis: Yes" cannot
+be set by the user alone. The report stays off-chain. The attester can rotate itself with
+`setOrbAttester`; deployed with `ORB_ATTESTER` unset (address 0), ORB is permanently off on that
+deployment. The attester key is a hot server key: before mainnet it should live in AWS KMS.
+
+Deploy (one per network, like v2; v2 stays where it is so its records remain verifiable):
+
+```bash
+PRIVATE_KEY=... VERIFY_BASE_URL=https://niara-register.vercel.app/verify/sepolia/ ORB_ATTESTER=0x... \
+  forge script script/DeploySignatureRegistryV3.s.sol --rpc-url sepolia --broadcast --gas-estimate-multiplier 800
+```
+
+Deploy cost is about 2.6M gas locally (v2: ~1.9M), still under HyperEVM's 3M small-block limit;
+check `eth_estimateGas` on each node first (Sepolia and Tempo reprice contract creation, see above).
 
 ## Run locally
 
