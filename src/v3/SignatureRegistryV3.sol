@@ -2,14 +2,13 @@
 pragma solidity ^0.8.24;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {IERC5192} from "../v2/SignatureRegistryV2.sol";
 
 /// @title SignatureRegistryV3
-/// @notice SignatureRegistryV2 plus two changes:
+/// @notice SignatureRegistryV2 plus three changes:
 ///
 ///         1. Commit-reveal registration. In v2 anyone watching the mempool
 ///            could copy a pending `register` call and land first, taking the
@@ -30,6 +29,13 @@ import {IERC5192} from "../v2/SignatureRegistryV2.sol";
 ///            The report itself stays off-chain; sending a document to ORB is
 ///            optional.
 ///
+///         3. One record per (document, signer), not one per document. In v2
+///            the first wallet to register a hash owned it and everybody else
+///            was locked out, so whoever held the hash first (the other party
+///            of a contract, say) could take it. Now each wallet that registers
+///            a hash gets its own record and receipt; nobody can block or take
+///            anyone else's. `signersOf(recordHash)` lists them in order.
+///
 ///         Same privacy model as v2: no readable metadata on-chain. This is a
 ///         complementary evidentiary record. It does NOT replace a notary
 ///         (cartório), does not issue or validate certificates, and has no
@@ -38,18 +44,26 @@ import {IERC5192} from "../v2/SignatureRegistryV2.sol";
 ///      attester, which can sign attestations and hand the role to a new key;
 ///      it cannot touch records. Deployed with attester = address(0), ORB is
 ///      permanently off for that deployment.
-contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
+contract SignatureRegistryV3 is ERC721, IERC5192 {
     using Strings for uint256;
 
-    uint8 public constant SCHEME_SIGNED_PDF_SHA256 = 0;
-    uint8 public constant SCHEME_SALTED_SHA256 = 1;
-    uint16 public constant LAST_LABELLED_TYPE = 11;
+    uint8 internal constant SCHEME_SIGNED_PDF_SHA256 = 0;
+    uint8 internal constant SCHEME_SALTED_SHA256 = 1;
+    uint16 internal constant LAST_LABELLED_TYPE = 11;
 
     /// The reveal must land at least this many blocks after the commit.
     /// One is enough: the point is that the commit predates the reveal.
-    uint256 public constant MIN_REVEAL_DELAY_BLOCKS = 1;
+    uint256 internal constant MIN_REVEAL_DELAY_BLOCKS = 1;
     /// A commitment can be revealed for this long, then it must be redone.
     uint256 public constant COMMITMENT_TTL = 1 days;
+
+    /// EIP-712 domain: name "Niara Register", version "3", this chain, this contract.
+    /// Computed by hand (no ERC-5267 eip712Domain()) to keep the bytecode under
+    /// HyperEVM's 3M-gas small-block limit.
+    bytes32 private constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant DOMAIN_NAME_HASH = keccak256("Niara Register");
+    bytes32 private constant DOMAIN_VERSION_HASH = keccak256("3");
 
     bytes32 public constant ORB_ATTESTATION_TYPEHASH =
         keccak256("OrbAttestation(bytes32 recordHash,bytes32 reportHash,address signer)");
@@ -59,6 +73,7 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
         uint64 timestamp;
         uint8 scheme;
         uint16 documentType;
+        bytes32 recordHash;
         bytes32 metadataCommitment;
         /// Hash of the ORB analysis report, zero when the document was not analysed.
         bytes32 orbReportHash;
@@ -69,7 +84,10 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
         uint64 timestamp;
     }
 
+    /// recordIdOf(recordHash, signer) => record. The receipt's token id is the record id.
     mapping(bytes32 => Record) private _records;
+    /// recordHash => wallets that registered it, in order.
+    mapping(bytes32 => address[]) private _signers;
     /// committer => commitment => when it was made.
     mapping(address => mapping(bytes32 => Commitment)) private _commitments;
 
@@ -86,10 +104,12 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
         uint16 documentType,
         bytes32 metadataCommitment,
         bytes32 orbReportHash,
+        uint256 tokenId,
         uint256 timestamp
     );
     event OrbAttesterChanged(address indexed previousAttester, address indexed newAttester);
 
+    /// This signer already registered this hash (other signers still can).
     error AlreadyRegistered(bytes32 recordHash);
     error InvalidHash();
     error UnknownScheme(uint8 scheme);
@@ -104,10 +124,7 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
     error InvalidOrbAttestation();
     error NotOrbAttester();
 
-    constructor(string memory verifyBaseUrl_, address orbAttester_)
-        ERC721("Niara Register Receipt", "NIARA-R")
-        EIP712("Niara Register", "3")
-    {
+    constructor(string memory verifyBaseUrl_, address orbAttester_) ERC721("Niara Register Receipt", "NIARA-R") {
         _verifyBaseUrl = verifyBaseUrl_;
         orbAttester = orbAttester_;
         emit OrbAttesterChanged(address(0), orbAttester_);
@@ -138,14 +155,14 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
     }
 
     /// @notice When `signer` made `commitment` (zeros if never, or already revealed).
+    ///         Revealable from blockNumber + 1 until timestamp + COMMITMENT_TTL.
     function commitmentInfo(address signer, bytes32 commitment)
         external
         view
-        returns (uint256 blockNumber, uint256 timestamp, uint256 revealableAtBlock, uint256 expiresAt)
+        returns (uint256 blockNumber, uint256 timestamp)
     {
         Commitment memory c = _commitments[signer][commitment];
-        if (c.blockNumber == 0) return (0, 0, 0, 0);
-        return (c.blockNumber, c.timestamp, c.blockNumber + MIN_REVEAL_DELAY_BLOCKS, c.timestamp + COMMITMENT_TTL);
+        return (c.blockNumber, c.timestamp);
     }
 
     // ------------------------------------------------------------------
@@ -162,7 +179,7 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
     /// @param orbReportHash Hash of the ORB report, or zero when there is none.
     /// @param orbSignature EIP-712 OrbAttestation signature by `orbAttester`; empty when
     ///        `orbReportHash` is zero.
-    /// @return tokenId The receipt id, equal to uint256(recordHash).
+    /// @return tokenId The receipt id, equal to uint256(recordIdOf(recordHash, msg.sender)).
     function register(
         bytes32 recordHash,
         uint8 scheme,
@@ -175,7 +192,8 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
         if (recordHash == bytes32(0)) revert InvalidHash();
         if (scheme > SCHEME_SALTED_SHA256) revert UnknownScheme(scheme);
         if (documentType == 0) revert InvalidDocumentType();
-        if (_records[recordHash].timestamp != 0) revert AlreadyRegistered(recordHash);
+        bytes32 id = recordIdOf(recordHash, msg.sender);
+        if (_records[id].timestamp != 0) revert AlreadyRegistered(recordHash);
 
         _consumeCommitment(commitmentOf(msg.sender, recordHash, nonce));
         if (orbReportHash != bytes32(0)) {
@@ -184,23 +202,30 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
             revert InvalidOrbAttestation();
         }
 
-        _records[recordHash] = Record({
+        _records[id] = Record({
             signer: msg.sender,
             timestamp: uint64(block.timestamp),
             scheme: scheme,
             documentType: documentType,
+            recordHash: recordHash,
             metadataCommitment: metadataCommitment,
             orbReportHash: orbReportHash
         });
+        _signers[recordHash].push(msg.sender);
 
-        tokenId = uint256(recordHash);
+        tokenId = uint256(id);
         // _mint, not _safeMint: the receipt goes to the caller, no callback needed.
         _mint(msg.sender, tokenId);
 
         emit Locked(tokenId);
         emit DocumentRegistered(
-            recordHash, msg.sender, scheme, documentType, metadataCommitment, orbReportHash, block.timestamp
+            recordHash, msg.sender, scheme, documentType, metadataCommitment, orbReportHash, tokenId, block.timestamp
         );
+    }
+
+    /// @notice Id of `signer`'s record of `recordHash` (also its receipt's token id).
+    function recordIdOf(bytes32 recordHash, address signer) public pure returns (bytes32) {
+        return keccak256(abi.encode(recordHash, signer));
     }
 
     function _consumeCommitment(bytes32 commitment) private {
@@ -222,7 +247,11 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
         view
         returns (bytes32)
     {
-        return _hashTypedDataV4(keccak256(abi.encode(ORB_ATTESTATION_TYPEHASH, recordHash, reportHash, signer)));
+        bytes32 domain = keccak256(
+            abi.encode(EIP712_DOMAIN_TYPEHASH, DOMAIN_NAME_HASH, DOMAIN_VERSION_HASH, block.chainid, address(this))
+        );
+        bytes32 structHash = keccak256(abi.encode(ORB_ATTESTATION_TYPEHASH, recordHash, reportHash, signer));
+        return keccak256(abi.encodePacked("\x19\x01", domain, structHash));
     }
 
     function _checkOrbAttestation(bytes32 recordHash, bytes32 reportHash, address signer, bytes calldata sig)
@@ -248,23 +277,37 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
     // Reads
     // ------------------------------------------------------------------
 
-    /// @notice Looks up a record. Returns all-zero values if the hash was never registered.
-    function verify(bytes32 recordHash)
+    /// @notice Wallets that registered `recordHash`, in registration order.
+    function signersOf(bytes32 recordHash) external view returns (address[] memory) {
+        return _signers[recordHash];
+    }
+
+    /// @notice `signer`'s record of `recordHash`. All zeros if that wallet never registered it.
+    function verify(bytes32 recordHash, address signer)
         external
         view
         returns (
             bool exists,
-            address signer,
             uint256 timestamp,
             uint8 scheme,
             uint16 documentType,
             bytes32 metadataCommitment,
-            bytes32 orbReportHash
+            bytes32 orbReportHash,
+            uint256 tokenId
         )
     {
-        Record memory r = _records[recordHash];
+        bytes32 id = recordIdOf(recordHash, signer);
+        Record memory r = _records[id];
         exists = r.timestamp != 0;
-        return (exists, r.signer, r.timestamp, r.scheme, r.documentType, r.metadataCommitment, r.orbReportHash);
+        return (
+            exists,
+            r.timestamp,
+            r.scheme,
+            r.documentType,
+            r.metadataCommitment,
+            r.orbReportHash,
+            exists ? uint256(id) : 0
+        );
     }
 
     /// @notice English label of a document type code ("Other (code N)" for codes added later).
@@ -321,7 +364,7 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         _requireOwned(tokenId);
         Record memory r = _records[bytes32(tokenId)];
-        string memory hashHex = tokenId.toHexString(32);
+        string memory hashHex = uint256(r.recordHash).toHexString(32);
 
         // Built in parts: one long string.concat is "stack too deep" with the optimizer on.
         string memory head = string.concat(
@@ -332,7 +375,7 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
             _verifyBaseUrl,
             hashHex,
             '","image":"data:image/svg+xml;base64,',
-            Base64.encode(bytes(_svg(hashHex, r.orbReportHash != bytes32(0))))
+            Base64.encode(bytes(_svg(hashHex)))
         );
         string memory attrs = string.concat(
             '","attributes":[{"trait_type":"Record hash","value":"',
@@ -343,6 +386,8 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
             r.scheme == SCHEME_SIGNED_PDF_SHA256 ? "Signed PDF (PAdES) SHA-256" : "Salted SHA-256"
         );
         string memory tail = string.concat(
+            '"},{"trait_type":"Signer","value":"',
+            Strings.toHexString(r.signer),
             '"},{"trait_type":"ORB analysis","value":"',
             r.orbReportHash != bytes32(0) ? "Yes" : "No",
             '"},{"display_type":"date","trait_type":"Registered at","value":',
@@ -352,7 +397,7 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
         return string.concat("data:application/json;base64,", Base64.encode(bytes(string.concat(head, attrs, tail))));
     }
 
-    function _svg(string memory hashHex, bool orb) private pure returns (string memory) {
+    function _svg(string memory hashHex) private pure returns (string memory) {
         // Short form: 0x + first 8 and last 8 hex digits.
         bytes memory h = bytes(hashHex);
         bytes memory head = new bytes(10);
@@ -374,10 +419,6 @@ contract SignatureRegistryV3 is ERC721, EIP712, IERC5192 {
             "...",
             string(tail),
             "</text>",
-            orb
-                ?
-                '<text x="200" y="290" fill="#b08d57" font-family="monospace" font-size="12" text-anchor="middle">ORB analysis attested</text>'
-                : "",
             '<text x="200" y="330" fill="#8a94a0" font-family="monospace" font-size="11" text-anchor="middle">non-transferable</text>',
             "</svg>"
         );

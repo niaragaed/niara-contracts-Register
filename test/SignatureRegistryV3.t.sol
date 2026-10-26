@@ -80,12 +80,16 @@ contract SignatureRegistryV3Test is Test {
     function test_CommitThenRevealInLaterBlock() public {
         _commitAndWait(alice, FILE_SHA);
         uint256 tokenId = _register(alice, FILE_SHA);
-        assertEq(tokenId, uint256(FILE_SHA));
+        assertEq(tokenId, uint256(keccak256(abi.encode(FILE_SHA, alice))));
+        assertEq(tokenId, uint256(registry.recordIdOf(FILE_SHA, alice)));
         assertEq(registry.ownerOf(tokenId), alice);
-        (bool exists, address signer, uint256 ts, uint8 scheme, uint16 t, bytes32 meta, bytes32 orbHash) =
-            registry.verify(FILE_SHA);
+        (bool exists, uint256 ts, uint8 scheme, uint16 t, bytes32 meta, bytes32 orbHash, uint256 id) =
+            registry.verify(FILE_SHA, alice);
         assertTrue(exists);
-        assertEq(signer, alice);
+        assertEq(id, tokenId);
+        (bool bobHas,,,,,, uint256 bobId) = registry.verify(FILE_SHA, bob);
+        assertFalse(bobHas);
+        assertEq(bobId, 0);
         assertEq(ts, block.timestamp);
         assertEq(scheme, 0);
         assertEq(t, CONTRACT_TYPE);
@@ -137,7 +141,8 @@ contract SignatureRegistryV3Test is Test {
         vm.expectRevert(SignatureRegistryV3.NoCommitment.selector);
         registry.register(FILE_SHA, 0, CONTRACT_TYPE, META, NONCE, bytes32(0), "");
         _register(alice, FILE_SHA);
-        assertEq(registry.ownerOf(uint256(FILE_SHA)), alice);
+        assertEq(registry.signersOf(FILE_SHA).length, 1);
+        assertEq(registry.signersOf(FILE_SHA)[0], alice);
     }
 
     /// Copying Alice's commit value does not help Bob either: it is bound to her address.
@@ -154,28 +159,47 @@ contract SignatureRegistryV3Test is Test {
         _register(alice, FILE_SHA);
     }
 
-    /// Bob can still register the same document with his OWN commitment if he
-    /// has the hash first (e.g. the other party of a contract). First valid
-    /// reveal wins; the record shows who registered, not who authored the PDF.
-    function test_FirstValidRevealWins() public {
+    /// Bob holds the same hash (e.g. the other party of a contract) and
+    /// registers it first with his own commitment. Alice is NOT locked out:
+    /// each wallet gets its own record and receipt, listed in order.
+    function test_EachSignerGetsTheirOwnRecord() public {
         _commit(alice, FILE_SHA, NONCE);
         _commit(bob, FILE_SHA, NONCE);
         vm.roll(block.number + 1);
-        _register(bob, FILE_SHA);
+        uint256 bobId = _register(bob, FILE_SHA);
+        vm.warp(block.timestamp + 60);
+        uint256 aliceId = _register(alice, FILE_SHA);
+        assertTrue(aliceId != bobId);
+        assertEq(registry.ownerOf(aliceId), alice);
+        assertEq(registry.ownerOf(bobId), bob);
+        address[] memory who = registry.signersOf(FILE_SHA);
+        assertEq(who.length, 2);
+        assertEq(who[0], bob);
+        assertEq(who[1], alice);
+        (, uint256 tBob,,,,,) = registry.verify(FILE_SHA, bob);
+        (, uint256 tAlice,,,,,) = registry.verify(FILE_SHA, alice);
+        assertEq(tAlice, tBob + 60);
+    }
+
+    function test_SameSignerCannotRegisterTwice() public {
+        _commitAndWait(alice, FILE_SHA);
+        _register(alice, FILE_SHA);
+        bytes32 n2 = bytes32(uint256(2));
+        _commit(alice, FILE_SHA, n2);
+        vm.roll(block.number + 1);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(SignatureRegistryV3.AlreadyRegistered.selector, FILE_SHA));
-        registry.register(FILE_SHA, 0, CONTRACT_TYPE, META, NONCE, bytes32(0), "");
+        registry.register(FILE_SHA, 0, CONTRACT_TYPE, META, n2, bytes32(0), "");
     }
 
     function test_CommitmentIsConsumed() public {
         bytes32 c = registry.commitmentOf(alice, FILE_SHA, NONCE);
         _commitAndWait(alice, FILE_SHA);
-        (uint256 bn,, uint256 revealable, uint256 expires) = registry.commitmentInfo(alice, c);
+        (uint256 bn, uint256 ts) = registry.commitmentInfo(alice, c);
         assertEq(bn, block.number - 1);
-        assertEq(revealable, block.number);
-        assertEq(expires, block.timestamp - 12 + registry.COMMITMENT_TTL());
+        assertEq(ts, block.timestamp - 12);
         _register(alice, FILE_SHA);
-        (bn,,,) = registry.commitmentInfo(alice, c);
+        (bn,) = registry.commitmentInfo(alice, c);
         assertEq(bn, 0);
     }
 
@@ -230,10 +254,11 @@ contract SignatureRegistryV3Test is Test {
     function test_EmitsLockedAndDocumentRegistered() public {
         _commitAndWait(alice, FILE_SHA);
         vm.expectEmit(false, false, false, true);
-        emit IERC5192.Locked(uint256(FILE_SHA));
+        uint256 id = uint256(registry.recordIdOf(FILE_SHA, alice));
+        emit IERC5192.Locked(id);
         vm.expectEmit(true, true, false, true);
         emit SignatureRegistryV3.DocumentRegistered(
-            FILE_SHA, alice, 0, CONTRACT_TYPE, META, bytes32(0), block.timestamp
+            FILE_SHA, alice, 0, CONTRACT_TYPE, META, bytes32(0), id, block.timestamp
         );
         _register(alice, FILE_SHA);
     }
@@ -244,10 +269,19 @@ contract SignatureRegistryV3Test is Test {
         _commitAndWait(alice, FILE_SHA);
         bytes memory sig = _orbSig(FILE_SHA, REPORT, alice, orbKey);
         vm.expectEmit(true, true, false, true);
-        emit SignatureRegistryV3.DocumentRegistered(FILE_SHA, alice, 0, CONTRACT_TYPE, META, REPORT, block.timestamp);
+        emit SignatureRegistryV3.DocumentRegistered(
+            FILE_SHA,
+            alice,
+            0,
+            CONTRACT_TYPE,
+            META,
+            REPORT,
+            uint256(registry.recordIdOf(FILE_SHA, alice)),
+            block.timestamp
+        );
         vm.prank(alice);
         registry.register(FILE_SHA, 0, CONTRACT_TYPE, META, NONCE, REPORT, sig);
-        (,,,,,, bytes32 orbHash) = registry.verify(FILE_SHA);
+        (,,,,, bytes32 orbHash,) = registry.verify(FILE_SHA, alice);
         assertEq(orbHash, REPORT);
     }
 
@@ -356,6 +390,9 @@ contract SignatureRegistryV3Test is Test {
         assertTrue(_contains(json, string.concat('"external_url":"', BASE, vm.toString(FILE_SHA), '"')));
         assertTrue(_contains(json, '"trait_type":"Document type","value":"Contract"'));
         assertTrue(_contains(json, '"trait_type":"ORB analysis","value":"No"'));
+        assertTrue(
+            _contains(json, string.concat('"trait_type":"Signer","value":"', vm.toLowercase(vm.toString(alice)), '"'))
+        );
         assertFalse(_contains(json, vm.toString(META)));
     }
 
@@ -385,7 +422,7 @@ contract SignatureRegistryV3Test is Test {
         vm.roll(block.number + 1);
         vm.prank(who);
         registry.register(h, scheme, docType, bytes32(0), nonce, bytes32(0), "");
-        assertEq(registry.ownerOf(uint256(h)), who);
+        assertEq(registry.ownerOf(uint256(registry.recordIdOf(h, who))), who);
     }
 
     // --- string helpers -----------------------------------------------------
