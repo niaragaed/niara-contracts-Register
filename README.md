@@ -131,8 +131,10 @@ PRIVATE_KEY=... VERIFY_BASE_URL=https://niara-register.vercel.app/verify/sepolia
   forge script script/DeploySignatureRegistryV3.s.sol --rpc-url sepolia --broadcast --gas-estimate-multiplier 800
 ```
 
-Deploy cost is about 2.6M gas locally (v2: ~1.9M), still under HyperEVM's 3M small-block limit;
-check `eth_estimateGas` on each node first (Sepolia and Tempo reprice contract creation, see above).
+Deploy cost is **2.88M gas** on a local node (anvil; v2: ~1.9M). That is under HyperEVM's 3M
+small-block limit, but with little margin: if HyperEVM refuses it, switch the deploy wallet to big
+blocks for that one transaction. Check `eth_estimateGas` on each node first (Sepolia and Tempo
+reprice contract creation, see above). A full register (commit + reveal) costs about 45k + 132k gas.
 
 ## Run locally
 
