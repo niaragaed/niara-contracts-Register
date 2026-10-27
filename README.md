@@ -97,7 +97,19 @@ target node before deploying anything new.
 
 Known limitation of v2: `register` can be front-run from the public mempool (someone copies the hash and lands first). Fixed in v3 below.
 
-## v3 (commit-reveal + ORB attestation; not deployed yet)
+## v3 (commit-reveal + ORB attestation)
+
+`SignatureRegistryV3` deployed from the Register wallet `0x4369db734fdC5A3Aefd4D40456161BfcD9E235dc`
+on 2026-10-27 (receipts in `broadcast/DeploySignatureRegistryV3.s.sol/`), with `ORB_ATTESTER` unset,
+so ORB is off on every deployment. v2 stays deployed so its records remain verifiable.
+
+| Network | SignatureRegistryV3 | Block | ORB |
+|---|---|---|---|
+| Ethereum Sepolia | `0x9fCc83555547384178Ab64a00ce579A469bd5650` | 12007158 | off |
+| Base Sepolia | `0x0d0c016E11b259050647EEa2e69A887C1128E499` | 51033363 | off |
+| Robinhood Chain Testnet | `0x0d0c016E11b259050647EEa2e69A887C1128E499` | 143759726 | off |
+| HyperEVM Testnet | `0x0d0c016E11b259050647EEa2e69A887C1128E499` | 68047077 | off |
+| Tempo Testnet | `0x0d0c016E11b259050647EEa2e69A887C1128E499` | 41444021 | off |
 
 [`src/v3/SignatureRegistryV3.sol`](src/v3/SignatureRegistryV3.sol) is v2 with three changes. Same hash
 recipes, same soulbound receipt, same "no readable metadata" rule.
