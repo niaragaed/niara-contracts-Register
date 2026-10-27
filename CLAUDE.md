@@ -21,6 +21,10 @@ change the ABI. New contracts should use English names from the start.
   and mints a soulbound receipt (ERC-721 + ERC-5192) to the signer in the same
   transaction. The hash recipes must stay byte-identical to the site's
   `lib/commitments.ts` in Niara-Register.
+- `src/v3/SignatureRegistryV3.sol` — v2 plus commit-reveal registration and the optional
+  ORB attestation (EIP-712 signature by `orbAttester`). New flows go here once it is deployed;
+  v2 stays deployed so its records remain verifiable. `commitmentOf` and the EIP-712 type must
+  stay identical to the site's implementation (cross-implementation vectors in the tests).
 - `src/mletr/TransferableRecordRegistry.sol` — transferable electronic records
   designed to line up with MLETR (singularity, exclusive control, amendment,
   surrender, termination). Describe it as "aligned with MLETR", never as
